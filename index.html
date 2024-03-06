@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
+  <style>
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+    }
+  </style>
+</head>
+<body>
+  <script>
+    // Define variables
+    let angle = 0;
+    let orbitRadius = 100;
+
+    function setup() {
+      createCanvas(800, 700);
+    }
+
+    function draw() {
+      background(0);
+
+      // Draw the yellow circle (sun)
+      fill(255, 255, 0);
+      noStroke();
+      ellipse(width / 2, height / 2, 50, 50);
+
+      // Calculate the position of the blue circle (planet)
+      let x = width / 2 + orbitRadius * cos(angle);
+      let y = height / 2 + orbitRadius * sin(angle);
+
+      // Draw the blue circle (planet)
+      fill(0, 0, 255);
+      ellipse(x, y, 20, 20);
+
+      // Update the angle for the next frame
+      angle += 0.02;
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "name": "orbital_sim_tool",
+  "version": "1.0.0",
+  "description": "Simple orbital simulation tool used for the University of Minnesota's AST 1001 course",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.18.3"
+  }
+}

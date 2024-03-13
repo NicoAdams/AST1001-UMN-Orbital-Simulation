@@ -1,26 +1,52 @@
+// TODO ITEMS
+// Add a reference circle (easy)
+// Add an arrow that shows the launch direction & speed
+// Add interactivity to the launch arrow
+// Add an interactive onscreen ruler which measures 3 AU
+
 // -- Global variables used in the orbit simulation --
 
-// State variables
-let stateIsOrbiting = true
-let stateIsSweeping = false
-
-// Global settings
-let G = 1;
-let dt = 1e-2;
-
-// Display properties
-let zoom = 1;
-let defaultAUDist = 150;
-let sunSize = 40;
-let planetSize = 20;
-
-// Orbit properties
-let orbit;
+// Interactive elements
+let orbitButton;
+let sweepButton;
+let clearSweepsButton;
+let referenceCircleButton;
 let vInputMag;
 let vInputAngle;
 
+// State variables
+let stateIsOrbiting = false;
+let stateIsSweeping = false;
+
+// Optional display elements
+let displayReferenceCircle = false;
+let displayRuler = false;
+
+/* Locking the program allows interactive elements to completely finish
+running before any new interactions take place. */
+let programLocked = false; 
+
+// Orbit properties
+let orbit;
+let sweeps;
+let sweepColors;
+
+// Global settings
+let G = 1;
+let dt = 1.1e-2;
+
+// Display properties
+let zoom = 1.2;
+let defaultAUDist = 150;
+let sunSize = 40;
+let planetSize = 20;
+let velocityArrowLenPerPhys = 0.5;
+let velocityArrowStrokeWidth = 9;
+let velocityArrowTriangleSize = 35;
+
 // Converts from input velocity units to physical velocity units
 function inputVelocityToPhys() {
+  updateVelocityInputValues();
   let vMagPhys = vInputMag / 30;
   let vAngleRad = vInputAngle * Math.PI/180;
   return createVector(
@@ -32,13 +58,19 @@ function inputVelocityToPhys() {
 // Creates a new orbit object
 function createNewOrbit() {
   let orbitGen = {};
+  
+  // Physics simulation values
   orbitGen.xPlanet = createVector(0,-1);
-  orbitGen.vPlanet = inputVelocityToPhys(vInputMag, vInputAngle);
+  orbitGen.vPlanet = inputVelocityToPhys();
+  
+  // Values for snapping the planet to its first orbit's path
   orbitGen.isFirstOrbit = true;
-  orbitGen.firstOrbitPath = [orbitGen.xPlanet];
   orbitGen.angularChangeThisOrbit = 0;
+  orbitGen.firstOrbitPath = [orbitGen.xPlanet];
   orbitGen.currSnapIndex = 0;
-  // orbitGen.angleRemainderPerOrbit = 0;
+  orbitGen.currSnapSubindex = 0;
+  orbitGen.indexCarryOver = 0;
+
   return orbitGen;
 }
 
@@ -74,8 +106,10 @@ function updatePlanet_Iterative_Subdivided(iterCount, subdivCount, G, dt) {
   }
 }
 
-function updatePlanet_SnapToPath() {
-  // TODO
+function interpolatePosition(path, index, subindex) {
+  p1 = path[index]
+  p2 = path[(index+1)%path.length]
+  return p1.copy().mult(subindex).add(p2.copy().mult(1-subindex))
 }
 
 // -- Functions for creating and managing the canvas --
@@ -84,18 +118,46 @@ function windowResized() {
   resizeCanvas(window.innerWidth, window.innerHeight);
 }
 
-// Utilities for converting between display and simulation coorindates
+// -- Utilities for converting between display and simulation coorindates --
+
 function getDisplayCenter() {return createVector(width/2, height/2)}
 function getDisplayPerPhys() {return defaultAUDist * zoom}
+
 function physToDisplay(xyPhys) {
   let centerDisplay = getDisplayCenter()
   let displayPerPhys = getDisplayPerPhys()
   return xyPhys.copy().mult(displayPerPhys).add(centerDisplay)
 }
+
 function displayToPhys(xyDisplay) {
   let centerDisplay = getDisplayCenter()
   let displayPerPhys = getDisplayPerPhys()
   return xyPhys.copy().sub(centerDisplay).div(displayPerPhys)
+}
+
+// -- Utilities for computing sweep data --
+
+function getTimeStepsPerDay() {
+  let dtPer365Days = 2*Math.PI;
+  let timeStepsPer365Days = dtPer365Days / dt;
+  return timeStepsPer365Days / 365;
+}
+
+function getSweepTimeInDays(sweepPath) {
+  return sweepPath.length / getTimeStepsPerDay();
+}
+
+function getSweepAreaInAU2(sweepPath) {
+  totalArea = 0;
+  for (let i=0; i<sweepPath.length-1; i++) {
+    let p1 = sweepPath[i];
+    let p2 = sweepPath[i+1];
+    let base = p1.dist(p2);
+    let baseCenter = p1.copy().add(p2).div(2);
+    let height = baseCenter.mag();
+    totalArea += 0.5 * base * height;
+  }
+  return totalArea;
 }
 
 // -- Draw functions --
@@ -114,34 +176,186 @@ function drawPlanet() {
   ellipse(planetPosDisplay.x, planetPosDisplay.y, planetSize*zoom, planetSize*zoom);
 }
 
-function drawPlanetPath() {
-  // Draw a line around the orbital path
-  // Mark each week with a small yellow circle
-  // Mark every 5 weeks with a large red circle
+function drawArrow(startDisplay, endDisplay, strokeWidth, triangleSize, color) {
+  fill(color);
+  stroke(color);
+  strokeWeight(strokeWidth);
 
-  // Draws the line
+  // Draw the arrow body (line)
+  line(startDisplay.x, startDisplay.y, endDisplay.x, endDisplay.y);
+
+  let arrowVecDisplay = endDisplay.copy().sub(startDisplay);
+  let arrowAngle = arrowVecDisplay.angleBetween(createVector(1,0));
+
+  /* "push()" and "pop()" generate a new drawing state and restore the
+  existing one, respectively. */
+  push();
+  fill(color);
+  noStroke();
+  translate(endDisplay.x, endDisplay.y);
+  rotate(-Math.PI/2-arrowAngle);
+  triangle(-triangleSize / 2, 0, triangleSize / 2, 0, 0, triangleSize);
+  pop();
+}
+
+function drawLaunchArrow() {
+  vPlanetInput = inputVelocityToPhys();
+  startPhys = orbit.xPlanet;
+  endPhys = orbit.xPlanet.copy().add(
+    vPlanetInput.copy().mult(velocityArrowLenPerPhys)
+  );
+  drawArrow(
+    physToDisplay(startPhys),
+    physToDisplay(endPhys),
+    velocityArrowStrokeWidth,
+    velocityArrowTriangleSize,
+    color(255, 255, 125, 125)
+  );
+}
+
+function drawSweeps() {
+  let sunPosDisplay = getDisplayCenter();
+  for (sweepPathIdx in sweeps) {
+    let sweepPath = sweeps[sweepPathIdx];
+    let sweepColor = sweepColors[sweepPathIdx%sweepColors.length];
+    
+    fill(color(sweepColor[0], sweepColor[1], sweepColor[2], 150));
+    
+    beginShape();
+    for (pPhys of sweepPath) {
+      p = physToDisplay(pPhys);
+      vertex(p.x, p.y);
+    }
+    vertex(sunPosDisplay.x, sunPosDisplay.y);
+    endShape(CLOSE);
+
+    fill(color(sweepColor[0], sweepColor[1], sweepColor[2], 255));
+
+    // Sweep label
+    let sweepMiddlePhys = sweepPath[int(sweepPath.length/2)];
+    let sweepTextPhys = sweepMiddlePhys.copy().add(
+      sweepMiddlePhys.copy().normalize().mult(0.17)
+    );
+    let sweepMiddleDisplay = physToDisplay(sweepTextPhys);
+    let sweepLabelMessage = (int(sweepPathIdx)+1);
+    textSize(30);
+    textAlign(CENTER, CENTER);
+    text(sweepLabelMessage, sweepMiddleDisplay.x, sweepMiddleDisplay.y);
+
+    // Sweep data
+    let sweepDataX = 15;
+    let sweepDataY = 15 + 90*sweepPathIdx;
+    let sweepDays = getSweepTimeInDays(sweepPath);
+    let sweepArea = getSweepAreaInAU2(sweepPath);
+    sweepAreaStr = Math.round(sweepArea*100)/100;
+
+    let sweepDataMessage = ""
+    sweepDataMessage += "SWEEP "+(int(sweepPathIdx)+1);
+    sweepDataMessage += "\nTime (days): "+Math.round(sweepDays);
+    sweepDataMessage += "\nArea (AU²): "+sweepAreaStr;
+    textSize(21);
+    textAlign(LEFT, TOP);
+    text(sweepDataMessage, sweepDataX, sweepDataY);
+
+  }
+}
+
+function drawPlanetPath() {
+  
+  stroke(255, 255, 0);
+  strokeWeight(1);
   for (let i=0; i<orbit.firstOrbitPath.length-1; i++) {
-    stroke(255, 255, 0);
+
+    // Draws the line
     p1 = physToDisplay(orbit.firstOrbitPath[i]);
     p2 = physToDisplay(orbit.firstOrbitPath[i+1]);
+    line(p1.x, p1.y, p2.x, p2.y);
+  }
+
+  const smallCircleDays = 7;
+  const smallCircleSize = 6;
+  const smallCircleColor = color(255, 255, 0, 255);
+  let smallCircleDayTracker = 0;
+  
+  const bigCircleDays = smallCircleDays * 5;
+  const bigCircleSize = 12;
+  const bigCircleColor = color(255, 0, 0, 255);
+  let bigCircleDayTracker = 0;
+
+  noStroke();
+  for (let i=0; i<orbit.firstOrbitPath.length; i++) {
+
+    p = physToDisplay(orbit.firstOrbitPath[i]);
+
+    // Checks whether a small circle should be drawn
+    smallCircleDayTracker += 1 / getTimeStepsPerDay();
+    if (smallCircleDayTracker >= smallCircleDays) {
+      smallCircleDayTracker -= smallCircleDays;
+      fill(smallCircleColor);
+      circle(p.x, p.y, smallCircleSize);
+    }
+
+    // Checks whether a big circle should be drawn
+    bigCircleDayTracker += 1 / getTimeStepsPerDay();
+    if (bigCircleDayTracker >= bigCircleDays) {
+      bigCircleDayTracker -= bigCircleDays;
+      fill(bigCircleColor);
+      circle(p.x, p.y, bigCircleSize);
+    }
+  }
+}
+
+function drawReferenceCircle() {
+  let refCirclePointsPhys = [];
+  let refCirclePointCount = 300;
+  for (let i=0; i<refCirclePointCount; i++) {
+    let angle = 2*Math.PI / refCirclePointCount * i;
+    refCirclePointsPhys.push(createVector(Math.cos(angle), Math.sin(angle)));
+  }
+  refCirclePointsPhys.push(refCirclePointsPhys[0])
+
+  stroke(100, 255, 100);
+  strokeWeight(1);
+  for (let i=0; i<refCirclePointsPhys.length-1; i++) {
+    p1 = physToDisplay(refCirclePointsPhys[i]);
+    p2 = physToDisplay(refCirclePointsPhys[i+1]);
+
     line(p1.x, p1.y, p2.x, p2.y);
   }
 }
 
 // -- Initialization & update functions --
 
+// TODO - where to put this one?
+function updateVelocityInputValues() {
+  vInputMag = document.getElementById("vInputMag").value;
+  vInputAngle = document.getElementById("vInputAngle").value;
+}
+
 function setup() {
   createCanvas(window.innerWidth, window.innerHeight);
+
+  orbitButton = document.getElementById("orbitButton");
+  sweepButton = document.getElementById("sweepButton");
+  clearSweepsButton = document.getElementById("clearSweepsButton");
+  referenceCircleButton = document.getElementById("referenceCircleButton");
 
   vInputMag = 25;
   vInputAngle = 30;
   orbit = createNewOrbit();
+  sweeps = [];
+
+  sweepColors = [
+    [50, 255, 255],
+    [100, 100, 255],
+    [255, 50, 255],
+    [255, 50, 100],
+    [255, 255, 50],
+    [50, 255, 50]
+  ]
 }
 
 function draw() {
-  background(0);
-
-  drawSun();
 
   if (stateIsOrbiting) {
 
@@ -158,43 +372,154 @@ function draw() {
       // Checks to see if the first orbit is complete
       let xPlanetPrev = orbit.firstOrbitPath[orbit.firstOrbitPath.length-2];
       orbit.angularChangeThisOrbit += Math.abs(xPlanetPrev.angleBetween(orbit.xPlanet));
-      orbit.isFirstOrbit = (orbit.angularChangeThisOrbit <= Math.PI*2);
-
-      drawPlanetPath();
-      drawPlanet();
-    
-    } else {
-      // Snaps to the grid of points from the first orbit
       
-      orbit.xPlanet = orbit.firstOrbitPath[orbit.currSnapIndex];
-      orbit.currSnapIndex++;
-      if (orbit.currSnapIndex == orbit.firstOrbitPath.length) {
+      // If so, sets up the planet to snap to its first orbit
+      if (orbit.angularChangeThisOrbit > Math.PI*2) {      
+        orbit.isFirstOrbit = false;
+        
+        angleCarryOver = (orbit.angularChangeThisOrbit - Math.PI*2);
+        firstStepAngle = Math.abs(
+          orbit.firstOrbitPath[1].angleBetween(orbit.firstOrbitPath[0])
+        );
+        orbit.indexCarryOver = angleCarryOver / firstStepAngle;
+
         orbit.currSnapIndex = 0;
+        orbit.currSnapSubindex = orbit.indexCarryOver;
       }
 
-      drawPlanetPath();
-      drawPlanet();
-    }
+    } else {
+      // Snaps to the grid of points from the first orbit
+      orbit.currSnapIndex++;
+      
+      // Handles completed orbits
+      if (orbit.currSnapIndex == orbit.firstOrbitPath.length) {
+        orbit.currSnapIndex = 0;
+        orbit.currSnapSubindex += orbit.indexCarryOver;
+        if (orbit.currSnapSubindex >= 1) {
+          orbit.currSnapIndex += 1;
+          orbit.currSnapSubindex -= 1;
+        }
+      }
 
-    // updatePlanet_Iterative(6, G, dt);
+      orbit.xPlanet = interpolatePosition(
+        orbit.firstOrbitPath, orbit.currSnapIndex, orbit.currSnapSubindex
+      );
+      
+    }
     
     if (stateIsSweeping) {
-      //TODO
+      sweeps[sweeps.length-1].push(orbit.xPlanet);
     }
   }
 
+  background(0);
+  drawSun();
+  drawPlanetPath();
+  drawPlanet();
+  drawSweeps();
+
   if (!stateIsOrbiting) {
-    // TODO
+    drawLaunchArrow();
+  }
+  if (displayReferenceCircle) {
+    drawReferenceCircle();
   }
 }
 
 // -- Interactive elements --
 
-function startNewOrbit() {
-  // Retrieve values from input elements when the button is pressed
-  vInputMag = document.getElementById("vInputMag").value;
-  vInputAngle = document.getElementById("vInputAngle").value;
+function button_toggleOrbit() {
+  if (programLocked) {return null;}
+  programLocked = true;
 
-  // Call a function to start a new orbit with the updated values
+  if (stateIsOrbiting) {
+    if (stateIsSweeping) {
+      action_endSweep();
+    }
+    action_clearAllSweeps();
+    action_endOrbit();
+  } else {
+    action_startOrbit();
+  }
+
+  programLocked = false;
+}
+
+function button_toggleSweep() {
+  if (programLocked) {return null;}
+  programLocked = true;
+
+  if (stateIsSweeping) {
+    action_endSweep();
+  } else {
+    action_startSweep();
+  }
+
+  programLocked = false;
+}
+
+function button_clearAllSweeps() {
+  if (programLocked) {return null;}
+  programLocked = true;
+  
+  action_clearAllSweeps();
+  
+  programLocked = false;
+
+}
+
+function button_toggleReferenceCircle() {
+  if (programLocked) {return null;}
+  programLocked = true;
+  
+  if (displayReferenceCircle) {
+    action_hideReferenceCircle();
+  } else {
+    action_showReferenceCircle();
+  }
+  
+  programLocked = false;
+}
+
+
+function action_startOrbit() {
+  stateIsOrbiting = true;
   orbit = createNewOrbit();
+  orbitButton.innerHTML = 'Stop Orbit';
+  sweepButton.style.display = 'block';
+}
+
+function action_endOrbit() {
+  stateIsOrbiting = false;
+  orbit = createNewOrbit();
+  orbitButton.innerHTML = 'Start New Orbit';
+  sweepButton.style.display = 'none';
+  clearSweepsButton.style.display = 'none';
+}
+
+function action_startSweep() {
+  stateIsSweeping = true;
+  sweeps.push([])
+  sweepButton.innerHTML = 'End Sweep';
+  clearSweepsButton.style.display = 'none';
+}
+
+function action_endSweep() {
+  stateIsSweeping = false;
+  sweepButton.innerHTML = 'Begin Sweep';
+  clearSweepsButton.style.display = 'block';  
+}
+
+function action_clearAllSweeps() {
+  sweeps = [];
+}
+
+function action_showReferenceCircle() {
+  displayReferenceCircle = true;
+  referenceCircleButton.innerHTML = 'Hide reference circle';
+}
+
+function action_hideReferenceCircle() {
+  displayReferenceCircle = false;
+  referenceCircleButton.innerHTML = 'Show reference circle';
 }

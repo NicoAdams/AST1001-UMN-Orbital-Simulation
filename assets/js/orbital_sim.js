@@ -1,14 +1,6 @@
 // TODO ITEMS
-// Add a reference circle (easy)
-// Add an arrow that shows the launch direction & speed
 // Add interactivity to the launch arrow
 // Add an interactive onscreen ruler which measures 3 AU
-
-// BUGS
-// Kepler's second law doesn't currently arise from this simulation!
-//     (The area/time ratio of various sweeps come out differently
-//     1. In a circular orbit, short sweeps have larger ratios than long ones 
-//     2. In an elliptical orbit, sweeps closer to the sun have smaller ratios than those far away
 
 // -- Global variables used in the orbit simulation --
 

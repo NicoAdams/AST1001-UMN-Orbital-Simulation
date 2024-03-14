@@ -4,6 +4,12 @@
 // Add interactivity to the launch arrow
 // Add an interactive onscreen ruler which measures 3 AU
 
+// BUGS
+// Kepler's second law doesn't currently arise from this simulation!
+//     (The area/time ratio of various sweeps come out differently
+//     1. In a circular orbit, short sweeps have larger ratios than long ones 
+//     2. In an elliptical orbit, sweeps closer to the sun have smaller ratios than those far away
+
 // -- Global variables used in the orbit simulation --
 
 // Interactive elements
@@ -28,12 +34,15 @@ let programLocked = false;
 
 // Orbit properties
 let orbit;
+
+// Sweep properties
 let sweeps;
 let sweepColors;
 
 // Global settings
 let G = 1;
 let dt = 1.1e-2;
+let sweepMax = 6;
 
 // Display properties
 let zoom = 1.2;
@@ -144,20 +153,30 @@ function getTimeStepsPerDay() {
 }
 
 function getSweepTimeInDays(sweepPath) {
-  return sweepPath.length / getTimeStepsPerDay();
+  return (sweepPath.length - 1) / getTimeStepsPerDay();
+}
+
+function getTriangleArea(points) {
+  let sides = [
+    points[0].dist(points[1]),
+    points[1].dist(points[2]),
+    points[2].dist(points[0]),
+  ];
+  let s = (sides[0] + sides[1] + sides[2]) / 2;
+  return Math. sqrt(
+    s * (s - sides[0]) * (s - sides[1]) * (s - sides[2])
+  );
 }
 
 function getSweepAreaInAU2(sweepPath) {
-  totalArea = 0;
+  let total = 0;
+  let center = createVector(0,0);
   for (let i=0; i<sweepPath.length-1; i++) {
     let p1 = sweepPath[i];
     let p2 = sweepPath[i+1];
-    let base = p1.dist(p2);
-    let baseCenter = p1.copy().add(p2).div(2);
-    let height = baseCenter.mag();
-    totalArea += 0.5 * base * height;
+    total += getTriangleArea([center, p1, p2]);
   }
-  return totalArea;
+  return total;
 }
 
 // -- Draw functions --
@@ -312,7 +331,7 @@ function drawReferenceCircle() {
     let angle = 2*Math.PI / refCirclePointCount * i;
     refCirclePointsPhys.push(createVector(Math.cos(angle), Math.sin(angle)));
   }
-  refCirclePointsPhys.push(refCirclePointsPhys[0])
+  refCirclePointsPhys.push(refCirclePointsPhys[0]);
 
   stroke(100, 255, 100);
   strokeWeight(1);
@@ -404,7 +423,7 @@ function draw() {
       orbit.xPlanet = interpolatePosition(
         orbit.firstOrbitPath, orbit.currSnapIndex, orbit.currSnapSubindex
       );
-      
+
     }
     
     if (stateIsSweeping) {
@@ -506,12 +525,24 @@ function action_startSweep() {
 
 function action_endSweep() {
   stateIsSweeping = false;
-  sweepButton.innerHTML = 'Begin Sweep';
+  if (sweeps.length == sweepMax) {
+    sweepButton.innerHTML = 'Max. sweeps reached';
+    sweepButton.disabled = true;
+  } else {
+    sweepButton.innerHTML = 'Begin Sweep';
+  }
   clearSweepsButton.style.display = 'block';  
 }
 
+function action_signalBelowSweepMax() {
+  sweepButton.innerHTML = 'Begin Sweep';  
+}
+
+
 function action_clearAllSweeps() {
   sweeps = [];
+  sweepButton.disabled = false;
+  sweepButton.innerHTML = 'Begin Sweep';  
 }
 
 function action_showReferenceCircle() {
